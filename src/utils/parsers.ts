@@ -1,9 +1,11 @@
 import type { BankTransaction, JobberReceipt, Match, AgingBucket } from '../types'
 import Papa from 'papaparse'
+import * as XLSX from 'xlsx'
 
 export const generateId = (prefix: string): string => 
   `${prefix}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
 
+// Bank PDF/CSV Parsing
 export const parseBankPDF = async (file: File): Promise<BankTransaction[]> => {
   const text = await file.text()
   
@@ -44,12 +46,11 @@ const isHeaderLine = (line: string): boolean => {
 }
 
 const parseTransactionLine = (line: string): Partial<BankTransaction> | null => {
-  // Date patterns
   const datePatterns = [
-    { regex: /(\d{1,2})\/(\d{1,2})\/(\d{4})/, order: [1, 2, 3] },
-    { regex: /(\d{1,2})-(\d{1,2})-(\d{4})/, order: [1, 2, 3] },
-    { regex: /(\d{4})-(\d{1,2})-(\d{1,2})/, order: [1, 2, 3] },
-    { regex: /(\d{1,2})\/(\d{1,2})\/(\d{2})/, order: [1, 2, 3], twoDigitYear: true },
+    { regex: /(\d{1,2})\/(\d{1,2})\/(\d{4})/ },
+    { regex: /(\d{1,2})-(\d{1,2})-(\d{4})/ },
+    { regex: /(\d{4})-(\d{1,2})-(\d{1,2})/ },
+    { regex: /(\d{1,2})\/(\d{1,2})\/(\d{2})/ },
   ]
   
   let date = ''
@@ -63,7 +64,6 @@ const parseTransactionLine = (line: string): Partial<BankTransaction> | null => 
   
   if (!date) return null
   
-  // Amount patterns
   const amountPattern = /-?\$?[\d,]+\.\d{2}/g
   const amounts = line.match(amountPattern)
   
@@ -72,7 +72,6 @@ const parseTransactionLine = (line: string): Partial<BankTransaction> | null => 
   const lastAmount = amounts[amounts.length - 1]
   const amountValue = parseFloat(lastAmount.replace(/[$,]/g, ''))
   
-  // Extract description (everything between date and amount)
   let description = line
   for (const pattern of datePatterns) {
     const match = line.match(pattern.regex)
@@ -104,7 +103,6 @@ const parseBankCSV = (text: string): BankTransaction[] => {
     const trimmed = line.trim()
     if (!trimmed) continue
     
-    // Skip header row
     if (!headerFound) {
       if (isHeaderLine(trimmed)) {
         headerFound = true
@@ -134,22 +132,59 @@ const parseBankCSV = (text: string): BankTransaction[] => {
   return transactions
 }
 
-export const parseJobberCSV = async (file: File): Promise<JobberReceipt[]> => {
+// Jobber CSV/Excel Parsing with better error handling
+export const parseJobberFile = async (file: File): Promise<JobberReceipt[]> => {
+  const fileName = file.name.toLowerCase()
+  
+  try {
+    if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+      return await parseJobberExcel(file)
+    } else if (fileName.endsWith('.csv')) {
+      return await parseJobberCSV(file)
+    } else {
+      throw new Error('Unsupported file format. Please upload CSV or Excel files.')
+    }
+  } catch (error) {
+    console.error('Error parsing Jobber file:', error)
+    throw error
+  }
+}
+
+const parseJobberExcel = async (file: File): Promise<JobberReceipt[]> => {
   return new Promise((resolve, reject) => {
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      transformHeader: (header: string) => header.trim().toLowerCase(),
-      complete: (results) => {
+    const reader = new FileReader()
+    
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target?.result as ArrayBuffer)
+        const workbook = XLSX.read(data, { type: 'array' })
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
+        const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 }) as string[][]
+        
+        if (jsonData.length < 2) {
+          reject(new Error('Excel file appears to be empty or has no data rows'))
+          return
+        }
+        
+        // Find header row
+        const headers = jsonData[0].map((h: string) => String(h).trim().toLowerCase())
         const receipts: JobberReceipt[] = []
         
-        ;(results.data as Record<string, string>[]).forEach((row) => {
-          const date = extractDate(row)
-          const employee = extractField(row, ['employee', 'team member', 'submitted by', 'user', 'staff', 'person']) || 'Unknown'
-          const job = extractField(row, ['job', 'job number', 'project', 'work order', 'wo', 'site']) || 'General'
-          const amount = extractAmount(row)
-          const description = extractField(row, ['description', 'expense name', 'details', 'memo', 'note', 'item']) || ''
-          const category = extractField(row, ['category', 'expense type', 'type', 'account']) || ''
+        for (let i = 1; i < jsonData.length; i++) {
+          const row = jsonData[i]
+          if (!row || row.length === 0) continue
+          
+          const rowData: Record<string, string> = {}
+          headers.forEach((header, index) => {
+            rowData[header] = String(row[index] || '').trim()
+          })
+          
+          const date = extractDate(rowData)
+          const employee = extractField(rowData, ['employee', 'team member', 'submitted by', 'user', 'staff', 'person', 'name']) || 'Unknown'
+          const job = extractField(rowData, ['job', 'job number', 'project', 'work order', 'wo', 'site', 'job #']) || 'General'
+          const amount = extractAmount(rowData)
+          const description = extractField(rowData, ['description', 'expense name', 'details', 'memo', 'note', 'item', 'expense']) || ''
+          const category = extractField(rowData, ['category', 'expense type', 'type', 'account']) || ''
           
           if (date && amount > 0) {
             receipts.push({
@@ -162,17 +197,72 @@ export const parseJobberCSV = async (file: File): Promise<JobberReceipt[]> => {
               category
             })
           }
-        })
+        }
         
         resolve(receipts)
+      } catch (error) {
+        reject(error)
+      }
+    }
+    
+    reader.onerror = () => reject(new Error('Failed to read Excel file'))
+    reader.readAsArrayBuffer(file)
+  })
+}
+
+const parseJobberCSV = async (file: File): Promise<JobberReceipt[]> => {
+  return new Promise((resolve, reject) => {
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: (header: string) => header.trim().toLowerCase().replace(/[^a-z0-9\s]/g, ''),
+      complete: (results) => {
+        try {
+          if (!results.data || results.data.length === 0) {
+            reject(new Error('CSV file appears to be empty'))
+            return
+          }
+          
+          const receipts: JobberReceipt[] = []
+          
+          ;(results.data as Record<string, string>[]).forEach((row) => {
+            const date = extractDate(row)
+            const employee = extractField(row, ['employee', 'teammember', 'submittedby', 'submitted by', 'user', 'staff', 'person', 'name', 'team member']) || 'Unknown'
+            const job = extractField(row, ['job', 'jobnumber', 'job number', 'project', 'workorder', 'work order', 'wo', 'site', 'job #', 'job#']) || 'General'
+            const amount = extractAmount(row)
+            const description = extractField(row, ['description', 'expensename', 'expense name', 'details', 'memo', 'note', 'item', 'expense']) || ''
+            const category = extractField(row, ['category', 'expensetype', 'expense type', 'type', 'account']) || ''
+            
+            if (date && amount > 0) {
+              receipts.push({
+                id: generateId('jobber'),
+                date,
+                employee: capitalizeWords(employee),
+                job: job.toUpperCase(),
+                amount,
+                description: description.substring(0, 150),
+                category
+              })
+            }
+          })
+          
+          if (receipts.length === 0) {
+            reject(new Error('No valid receipts found in file. Please check the column headers.'))
+            return
+          }
+          
+          resolve(receipts)
+        } catch (error) {
+          reject(error)
+        }
       },
-      error: (error) => reject(error)
+      error: (error) => reject(new Error(`CSV parsing error: ${error.message}`))
     })
   })
 }
 
 const extractDate = (row: Record<string, string>): string => {
-  const dateFields = ['date', 'report date', 'expense date', 'transaction date', 'created', 'submitted']
+  const dateFields = ['date', 'reportdate', 'report date', 'expensedate', 'expense date', 'transactiondate', 'transaction date', 'created', 'submitted', 'datecreated', 'date created']
   for (const field of dateFields) {
     if (row[field]) {
       const normalized = normalizeDate(row[field])
@@ -183,10 +273,15 @@ const extractDate = (row: Record<string, string>): string => {
 }
 
 const extractAmount = (row: Record<string, string>): number => {
-  const amountFields = ['amount', 'total', 'total amount', 'cost', 'value', 'price', 'expense amount']
+  const amountFields = ['amount', 'total', 'totalamount', 'total amount', 'cost', 'value', 'price', 'expenseamount', 'expense amount', 'expense']
   for (const field of amountFields) {
     if (row[field]) {
-      const cleaned = row[field].replace(/[$,]/g, '').trim()
+      // Handle various formats: $1,234.56, 1234.56, (1,234.56) for negative
+      let cleaned = row[field].replace(/[$,]/g, '').trim()
+      // Handle parentheses for negative numbers
+      if (cleaned.startsWith('(') && cleaned.endsWith(')')) {
+        cleaned = '-' + cleaned.slice(1, -1)
+      }
       const amount = parseFloat(cleaned)
       if (!isNaN(amount)) return Math.abs(amount)
     }
@@ -196,6 +291,11 @@ const extractAmount = (row: Record<string, string>): number => {
 
 const extractField = (row: Record<string, string>, possibleNames: string[]): string => {
   for (const name of possibleNames) {
+    const normalizedName = name.toLowerCase().replace(/[^a-z0-9\s]/g, '')
+    if (row[normalizedName] && row[normalizedName].trim()) {
+      return row[normalizedName].trim()
+    }
+    // Also try exact match
     if (row[name] && row[name].trim()) {
       return row[name].trim()
     }
@@ -247,7 +347,6 @@ export const findExactMatches = (
   const usedBankIds = new Set<string>()
   const usedReceiptIds = new Set<string>()
   
-  // Create amount-indexed maps for faster lookup
   const bankByAmount = new Map<number, BankTransaction[]>()
   bankTransactions.forEach(bt => {
     const list = bankByAmount.get(bt.amount) || []
@@ -255,7 +354,6 @@ export const findExactMatches = (
     bankByAmount.set(bt.amount, list)
   })
   
-  // Sort receipts by date (newest first) for better matching
   const sortedReceipts = [...jobberReceipts].sort((a, b) => 
     new Date(b.date).getTime() - new Date(a.date).getTime()
   )

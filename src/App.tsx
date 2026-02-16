@@ -1,17 +1,15 @@
 import { useState } from 'react'
-import { FileText, Receipt, BarChart3, LayoutDashboard, AlertCircle, Moon, Sun, Trash2 } from 'lucide-react'
+import { FileText, Receipt, BarChart3, LayoutDashboard, AlertCircle, Trash2, Zap } from 'lucide-react'
 import { UploadSection } from './components/UploadSection'
 import { Dashboard } from './components/Dashboard'
 import { MatchView } from './components/MatchView'
 import { UnmatchedView } from './components/UnmatchedView'
 import { SpectrumChart } from './components/SpectrumChart'
 import { useAppData } from './hooks/useAppData'
-import { useLocalStorage } from './hooks/useLocalStorage'
 import type { ViewTab } from './types'
 
 function App() {
   const [activeTab, setActiveTab] = useState<ViewTab>('upload')
-  const [darkMode, setDarkMode] = useLocalStorage('tm-dark-mode', true)
   const { 
     bankTransactions, 
     jobberReceipts, 
@@ -26,18 +24,8 @@ function App() {
     clearAllData
   } = useAppData()
 
-  const toggleDarkMode = () => {
-    setDarkMode(!darkMode)
-    if (darkMode) {
-      document.documentElement.classList.remove('dark')
-    } else {
-      document.documentElement.classList.add('dark')
-    }
-  }
-
   const handleClearBank = () => {
     if (confirm('Clear all bank transactions?')) {
-      // Need to implement this in useAppData
       window.location.reload()
     }
   }
@@ -57,21 +45,29 @@ function App() {
   ]
 
   return (
-    <div className={darkMode ? 'dark' : ''}>
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors">
-        {/* Header */}
-        <header className="sticky top-0 z-50 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm">
+    <div className="min-h-screen bg-gray-950 text-gray-100">
+      {/* Background gradient */}
+      <div className="fixed inset-0 bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950 pointer-events-none" />
+      <div className="fixed inset-0 bg-[radial-gradient(ellipse_at_top,rgba(59,130,246,0.08),transparent_50%)] pointer-events-none" />
+      
+      <div className="relative">
+        {/* Sleek Header */}
+        <header className="sticky top-0 z-50 border-b border-gray-800/50 bg-gray-950/80 backdrop-blur-xl">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between h-16">
-              <div className="flex items-center space-x-3">
-                <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-                  <BarChart3 className="w-5 h-5 text-white" />
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 flex items-center justify-center shadow-lg shadow-purple-500/20">
+                  <Zap className="w-5 h-5 text-white" />
                 </div>
-                <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                  TransactionMatcher
-                </h1>
+                <div>
+                  <h1 className="text-xl font-bold gradient-text">
+                    TransactionMatcher
+                  </h1>
+                  <p className="text-xs text-gray-500">Reconcile & Match</p>
+                </div>
               </div>
-              <div className="flex items-center space-x-2">
+              
+              <div className="flex items-center gap-3">
                 {(stats.totalBank > 0 || stats.totalReceipts > 0) && (
                   <button
                     onClick={() => {
@@ -79,19 +75,12 @@ function App() {
                         clearAllData()
                       }
                     }}
-                    className="p-2 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                    className="p-2.5 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all"
                     title="Clear all data"
                   >
                     <Trash2 className="w-5 h-5" />
                   </button>
                 )}
-                <button
-                  onClick={toggleDarkMode}
-                  className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                  title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-                >
-                  {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-                </button>
               </div>
             </div>
           </div>
@@ -99,31 +88,31 @@ function App() {
 
         {/* Stats Bar */}
         {(stats.totalBank > 0 || stats.totalReceipts > 0) && (
-          <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+          <div className="border-b border-gray-800/50 bg-gray-900/30 backdrop-blur-sm">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
-              <div className="flex flex-wrap items-center gap-4 text-sm">
-                <div className="flex items-center space-x-2">
-                  <span className="text-gray-500 dark:text-gray-400">Bank:</span>
-                  <span className="font-semibold text-blue-600 dark:text-blue-400">{stats.totalBank}</span>
+              <div className="flex flex-wrap items-center gap-6 text-sm">
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-500">Bank</span>
+                  <span className="font-semibold text-blue-400">{stats.totalBank}</span>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <span className="text-gray-500 dark:text-gray-400">Receipts:</span>
-                  <span className="font-semibold text-green-600 dark:text-green-400">{stats.totalReceipts}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-500">Receipts</span>
+                  <span className="font-semibold text-emerald-400">{stats.totalReceipts}</span>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <span className="text-gray-500 dark:text-gray-400">Matched:</span>
-                  <span className="font-semibold text-green-600 dark:text-green-400">{stats.matched}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-500">Matched</span>
+                  <span className="font-semibold text-emerald-400">{stats.matched}</span>
                 </div>
                 {stats.unmatchedBank > 0 && (
-                  <div className="flex items-center space-x-2">
-                    <span className="text-gray-500 dark:text-gray-400">Unmatched:</span>
-                    <span className="font-semibold text-red-600 dark:text-red-400">{stats.unmatchedBank}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-500">Unmatched</span>
+                    <span className="font-semibold text-red-400">{stats.unmatchedBank}</span>
                   </div>
                 )}
                 {stats.unmatchedAmount > 0 && (
-                  <div className="flex items-center space-x-2 ml-auto">
-                    <span className="text-gray-500 dark:text-gray-400">At Risk:</span>
-                    <span className="font-bold text-red-600 dark:text-red-400">
+                  <div className="flex items-center gap-2 ml-auto">
+                    <span className="text-gray-500">At Risk</span>
+                    <span className="font-bold text-red-400">
                       ${stats.unmatchedAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>
@@ -134,26 +123,26 @@ function App() {
         )}
 
         {/* Navigation */}
-        <nav className="sticky top-16 z-40 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+        <nav className="sticky top-16 z-40 border-b border-gray-800/50 bg-gray-950/60 backdrop-blur-xl">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex space-x-1 overflow-x-auto scrollbar-thin py-2">
               {tabs.map(({ id, label, icon: Icon, badge }) => (
                 <button
                   key={id}
                   onClick={() => setActiveTab(id)}
-                  className={`flex items-center space-x-2 px-4 py-2 rounded-lg whitespace-nowrap transition-all ${
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl whitespace-nowrap transition-all duration-200 ${
                     activeTab === id
-                      ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium'
-                      : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400'
+                      ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30'
+                      : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'
                   }`}
                 >
                   <Icon className="w-4 h-4" />
-                  <span>{label}</span>
+                  <span className="font-medium">{label}</span>
                   {badge !== undefined && badge > 0 && (
                     <span className={`ml-1 px-2 py-0.5 text-xs rounded-full ${
                       id === 'unmatched' 
                         ? 'bg-red-500 text-white' 
-                        : 'bg-blue-600 text-white'
+                        : 'bg-blue-500 text-white'
                     }`}>
                       {badge}
                     </span>
@@ -165,7 +154,7 @@ function App() {
         </nav>
 
         {/* Main Content */}
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-24">
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-24">
           {activeTab === 'upload' && (
             <UploadSection
               onBankUpload={addBankTransactions}
