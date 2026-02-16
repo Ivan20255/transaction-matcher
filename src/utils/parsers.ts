@@ -240,23 +240,38 @@ const parseJobberCSV = async (file: File): Promise<JobberReceipt[]> => {
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
-      transformHeader: (header: string) => header.trim().toLowerCase().replace(/[^a-z0-9\s]/g, ''),
+      transformHeader: (header: string) => {
+        const normalized = header.trim().toLowerCase().replace(/[^a-z0-9]/g, '')
+        console.log(`CSV header: "${header}" -> "${normalized}"`)
+        return normalized
+      },
       complete: (results) => {
         try {
+          console.log('CSV parse complete. Meta:', results.meta)
+          console.log('CSV fields:', results.meta.fields)
+          console.log('Row count:', results.data.length)
+          
           if (!results.data || results.data.length === 0) {
             reject(new Error('CSV file appears to be empty'))
             return
           }
           
+          // Log first row for debugging
+          console.log('First row sample:', results.data[0])
+          
           const receipts: JobberReceipt[] = []
           
-          ;(results.data as Record<string, string>[]).forEach((row) => {
+          ;(results.data as Record<string, string>[]).forEach((row, index) => {
+            console.log(`Processing row ${index}:`, row)
+            
             const date = extractDate(row)
-            const employee = extractField(row, ['employee', 'teammember', 'submittedby', 'submitted by', 'user', 'staff', 'person', 'name', 'team member']) || 'Unknown'
-            const job = extractField(row, ['job', 'jobnumber', 'job number', 'project', 'workorder', 'work order', 'wo', 'site', 'job #', 'job#']) || 'General'
+            const employee = extractField(row, ['employee', 'teammember', 'submittedby', 'submittedby', 'user', 'staff', 'person', 'name', 'teammember']) || 'Unknown'
+            const job = extractField(row, ['job', 'jobnumber', 'project', 'workorder', 'wo', 'site', 'job']) || 'General'
             const amount = extractAmount(row)
-            const description = extractField(row, ['description', 'expensename', 'expense name', 'details', 'memo', 'note', 'item', 'expense']) || ''
-            const category = extractField(row, ['category', 'expensetype', 'expense type', 'type', 'account']) || ''
+            const description = extractField(row, ['description', 'expensename', 'details', 'memo', 'note', 'item', 'expense']) || ''
+            const category = extractField(row, ['category', 'expensetype', 'type', 'account']) || ''
+            
+            console.log(`Row ${index} extracted:`, { date, employee, job, amount, description })
             
             if (date && amount > 0) {
               receipts.push({
@@ -268,11 +283,16 @@ const parseJobberCSV = async (file: File): Promise<JobberReceipt[]> => {
                 description: description.substring(0, 150),
                 category
               })
+            } else {
+              console.log(`Row ${index} skipped - missing date or amount`)
             }
           })
           
+          console.log(`Total valid receipts: ${receipts.length}`)
+          
           if (receipts.length === 0) {
-            reject(new Error('No valid receipts found in file. Please check the column headers.'))
+            const availableFields = results.meta.fields?.join(', ') || 'unknown'
+            reject(new Error(`No valid receipts found. Available columns: ${availableFields}. Expected columns like: date, amount, employee, job, description`))
             return
           }
           
@@ -298,31 +318,59 @@ const extractDate = (row: Record<string, string>): string => {
 }
 
 const extractAmount = (row: Record<string, string>): number => {
-  const amountFields = ['amount', 'total', 'totalamount', 'total amount', 'cost', 'value', 'price', 'expenseamount', 'expense amount', 'expense']
+  console.log('Extracting amount from row keys:', Object.keys(row))
+  console.log('Row data:', row)
+  
+  const amountFields = ['amount', 'total', 'totalamount', 'totalamount ', 'cost', 'value', 'price', 'expenseamount', 'expense amount', 'expense', ' amt', 'amt', 'payment', 'payments']
   for (const field of amountFields) {
-    if (row[field]) {
-      // Handle various formats: $1,234.56, 1234.56, (1,234.56) for negative
+    // Try exact match first
+    if (row[field] !== undefined && row[field] !== '') {
+      console.log(`Found amount field "${field}":`, row[field])
       let cleaned = row[field].replace(/[$,]/g, '').trim()
-      // Handle parentheses for negative numbers
       if (cleaned.startsWith('(') && cleaned.endsWith(')')) {
         cleaned = '-' + cleaned.slice(1, -1)
       }
       const amount = parseFloat(cleaned)
-      if (!isNaN(amount)) return Math.abs(amount)
+      if (!isNaN(amount)) {
+        console.log(`Parsed amount: ${Math.abs(amount)}`)
+        return Math.abs(amount)
+      }
+    }
+    // Try normalized match
+    const normalizedField = field.toLowerCase().replace(/[^a-z0-9]/g, '')
+    for (const key of Object.keys(row)) {
+      const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, '')
+      if (normalizedKey === normalizedField && row[key]) {
+        console.log(`Found amount via normalized match "${key}" -> "${field}":`, row[key])
+        let cleaned = row[key].replace(/[$,]/g, '').trim()
+        if (cleaned.startsWith('(') && cleaned.endsWith(')')) {
+          cleaned = '-' + cleaned.slice(1, -1)
+        }
+        const amount = parseFloat(cleaned)
+        if (!isNaN(amount)) {
+          console.log(`Parsed amount: ${Math.abs(amount)}`)
+          return Math.abs(amount)
+        }
+      }
     }
   }
+  console.log('No amount found in row')
   return 0
 }
 
 const extractField = (row: Record<string, string>, possibleNames: string[]): string => {
   for (const name of possibleNames) {
-    const normalizedName = name.toLowerCase().replace(/[^a-z0-9\s]/g, '')
-    if (row[normalizedName] && row[normalizedName].trim()) {
-      return row[normalizedName].trim()
-    }
-    // Also try exact match
+    // Try exact match first
     if (row[name] && row[name].trim()) {
       return row[name].trim()
+    }
+    // Try normalized match (alphanumeric only, lowercase)
+    const normalizedName = name.toLowerCase().replace(/[^a-z0-9]/g, '')
+    for (const key of Object.keys(row)) {
+      const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, '')
+      if (normalizedKey === normalizedName && row[key]) {
+        return row[key].trim()
+      }
     }
   }
   return ''
