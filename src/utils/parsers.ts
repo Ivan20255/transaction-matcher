@@ -135,14 +135,24 @@ const parseBankCSV = (text: string): BankTransaction[] => {
 // Jobber CSV/Excel Parsing with better error handling
 export const parseJobberFile = async (file: File): Promise<JobberReceipt[]> => {
   const fileName = file.name.toLowerCase()
+  console.log('Parsing Jobber file:', fileName, 'Type:', file.type)
   
   try {
     if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+      console.log('Detected Excel file, using Excel parser')
       return await parseJobberExcel(file)
     } else if (fileName.endsWith('.csv')) {
+      console.log('Detected CSV file, using CSV parser')
       return await parseJobberCSV(file)
     } else {
-      throw new Error('Unsupported file format. Please upload CSV or Excel files.')
+      // Try to detect by content
+      const text = await file.text()
+      console.log('File content preview:', text.substring(0, 200))
+      if (text.includes(',') || text.includes('\t')) {
+        console.log('Attempting CSV parse based on content')
+        return await parseJobberCSV(file)
+      }
+      throw new Error('Unsupported file format. Please upload CSV or Excel files (.csv, .xlsx, .xls)')
     }
   } catch (error) {
     console.error('Error parsing Jobber file:', error)
@@ -156,10 +166,17 @@ const parseJobberExcel = async (file: File): Promise<JobberReceipt[]> => {
     
     reader.onload = (e) => {
       try {
+        console.log('Reading Excel file...')
         const data = new Uint8Array(e.target?.result as ArrayBuffer)
+        console.log('File size:', data.length, 'bytes')
+        
         const workbook = XLSX.read(data, { type: 'array' })
+        console.log('Excel sheets found:', workbook.SheetNames)
+        
         const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
         const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 }) as string[][]
+        
+        console.log('Excel rows found:', jsonData.length)
         
         if (jsonData.length < 2) {
           reject(new Error('Excel file appears to be empty or has no data rows'))
@@ -167,7 +184,9 @@ const parseJobberExcel = async (file: File): Promise<JobberReceipt[]> => {
         }
         
         // Find header row
-        const headers = jsonData[0].map((h: string) => String(h).trim().toLowerCase())
+        const headers = jsonData[0].map((h: string) => String(h).trim().toLowerCase().replace(/[^a-z0-9\s]/g, ''))
+        console.log('Excel headers found:', headers)
+        
         const receipts: JobberReceipt[] = []
         
         for (let i = 1; i < jsonData.length; i++) {
@@ -179,12 +198,16 @@ const parseJobberExcel = async (file: File): Promise<JobberReceipt[]> => {
             rowData[header] = String(row[index] || '').trim()
           })
           
+          console.log('Processing row', i, ':', rowData)
+          
           const date = extractDate(rowData)
-          const employee = extractField(rowData, ['employee', 'team member', 'submitted by', 'user', 'staff', 'person', 'name']) || 'Unknown'
-          const job = extractField(rowData, ['job', 'job number', 'project', 'work order', 'wo', 'site', 'job #']) || 'General'
+          const employee = extractField(rowData, ['employee', 'teammember', 'team member', 'submittedby', 'submitted by', 'user', 'staff', 'person', 'name']) || 'Unknown'
+          const job = extractField(rowData, ['job', 'jobnumber', 'job number', 'project', 'workorder', 'work order', 'wo', 'site', 'job #', 'job#']) || 'General'
           const amount = extractAmount(rowData)
-          const description = extractField(rowData, ['description', 'expense name', 'details', 'memo', 'note', 'item', 'expense']) || ''
-          const category = extractField(rowData, ['category', 'expense type', 'type', 'account']) || ''
+          const description = extractField(rowData, ['description', 'expensename', 'expense name', 'details', 'memo', 'note', 'item', 'expense']) || ''
+          const category = extractField(rowData, ['category', 'expensetype', 'expense type', 'type', 'account']) || ''
+          
+          console.log('Extracted:', { date, employee, job, amount, description })
           
           if (date && amount > 0) {
             receipts.push({
@@ -199,9 +222,11 @@ const parseJobberExcel = async (file: File): Promise<JobberReceipt[]> => {
           }
         }
         
+        console.log('Total receipts extracted:', receipts.length)
         resolve(receipts)
       } catch (error) {
-        reject(error)
+        console.error('Excel parsing error:', error)
+        reject(new Error('Failed to parse Excel file: ' + (error instanceof Error ? error.message : 'Unknown error')))
       }
     }
     
